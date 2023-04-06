@@ -84,5 +84,5 @@ async def main():
         await task
         await task0
 
-new_cell = cell_class.Cell("palletcell2")
+new_cell = cell_class.Cell("1")
 asyncio.run(new_cell.main())
