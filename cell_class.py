@@ -5,7 +5,16 @@ import asyncio_mqtt as aiomqtt
 import asyncio
 import time
 
+# JSON telegram template classes
 import json_telegrams
+
+# TODO:
+# 1. Implement suspend and aborted states and how to handle these requests from HCL.
+# 2. Implement the request of partial layer palletization Page 28, chapter 6.2.
+# 3. Implement completion state when palletization is done.
+# 4. Implement 6.1 palletizing loop, that sends Container at ID Point, and Container placed on Pallet.
+# 
+
 # class that represents the pallet cell
 
 class Cell:
@@ -61,11 +70,11 @@ class Cell:
             await asyncio.sleep(0.5)
 
     
-    async def test_listen(self):
+    async def test_listen(self): # TODO change name to something more appropriate
         async with self.client.messages() as messages:
             async for message in messages:
-                if message.topic.matches("palletcell2"):
-                    print("got message " + message.payload.decode())
+                if message.topic.matches("palletcell2"): # TODO: change to HCL state request topic
+                    print("got message " + message.payload.decode()) # TODO: Should act according to the message
     
     async def subcribe_handler(self):
         await self.client.subscribe(self.HCL_start_layer_topic)
@@ -82,7 +91,7 @@ class Cell:
             await listen_task
             await start_layer_task
             await subscribe_handler_task
-            #await state_update_task
+            await state_update_task
         
     
     
