@@ -1,6 +1,7 @@
 import utils
 import json
 
+# TODO: add a class for each telegram type
 alarm_telegram = {
     "version": "v1.0",
     "timestamp": utils.get_datetime(),
