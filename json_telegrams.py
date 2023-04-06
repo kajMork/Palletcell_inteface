@@ -9,6 +9,43 @@ alarm_telegram = {
     "active": None
 }
 
+#5.2.1 System State (Cell -> HLC)
+#Sent by the palletizing cell when state has changed or when requested by the HLC.
+#The states follow the PackML state model [1] in addition to an “Offline” state (typically part of the Last Will and Testament).
+#When a system connects to the broker, it should send an initial status message.
+#Status messages should be sent with retention enabled.
+class system_state:
+    def __init__(self, prefix, cell_id, client, state):
+        # Topic specific variables
+        self.prefix = prefix+"/"
+        self.cell_id = cell_id+"/"
+        self.topic_name = self.prefix + self.cell_id + "system/state"
+        
+        # MQTT specific variables
+        self.client = client
+        
+        # Telegram specific variables
+        self.version = "v1.0"
+        self.state = state
+        
+        # Create the telegram
+        self.system_state_telegram = {
+            "version": self.version,
+            "state": self.state,
+            "timestamp": utils.get_datetime()
+        }
+        
+    async def send_telegram(self):
+        telegram = self.system_state_telegram.copy()
+        # Update timestamp
+        if self.state != "Offline":
+            telegram["timestamp"] = utils.get_datetime()
+        else:
+            telegram["timestamp"] = None
+        await self.client.publish(self.topic_name, json.dumps(telegram)) # Send telegram
+        del telegram # Delete the telegram to save memory
+
+
 # 5.4.1 Container at ID Point (Cell -> HCL)
 #Telegram transmitted by the cell when a container ID is scanned used e.g. a barcode
 #scanner or RFID reader.
@@ -84,7 +121,7 @@ class palletize_start_layer:
         # Topic specific variables
         self.prefix = prefix+"/"
         self.cell_id = cell_id+"/"
-        self.topic_name = self.prefix + self.cell_id + "palletize/start_layer"
+        self.topic_name = self.prefix + self.cell_id + "palletize/start-layer"
         
         # MQTT specific variables
         self.client = client
@@ -119,9 +156,4 @@ class palletize_start_layer:
 
 if __name__ == "__main__":
     # For testing purposes
-    
-    new_alarm_telegram = alarm_telegram.copy()
-    new_container_ID_point_telegram = container_ID_point_telegram.copy()
-    
-    print(new_alarm_telegram)
-    print(new_container_ID_point_telegram)
+    pass # Do nothing
