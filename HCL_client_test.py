@@ -60,7 +60,7 @@ async def setup(client):
 
     # Subscribe to topics
     await client.subscribe("HCL_feedback")
-    await client.subscribe("Cell_status")
+    await client.subscribe("palletcells/1/system/state")
     await client.publish("palletcell", "Start")
 
 
