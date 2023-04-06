@@ -4,7 +4,7 @@ import asyncio_mqtt as aiomqtt
 import aioconsole
 import asyncio
 import json
-
+import json_telegrams
 
 async def wait_for_user_input(client, firsrun):
     while True:
@@ -26,13 +26,14 @@ async def wait_for_user_input(client, firsrun):
         #    firsrun = False
         if user_input == "execute":
             # Convert python dictionary to json string and send to mqtt broker
-            await client.publish("palletcell", json.dumps(start_layer_command)) 
+            start_layer_obj = json_telegrams.palletize_start_layer("HCL", "1", client, 1, 0, 0, 7, 15, 15)
+            await start_layer_obj.send_telegram()
         elif user_input == "suspend":
             print("Sending status")
             await client.publish("palletcell", "stop")
         elif user_input == "get status":
             print("Sending status")
-            await client.publish("palletcell", "status")
+            await client.publish("palletcell2", "status")
         elif user_input == "help":
             print("Commands: execute, suspend, get status")
         else:
