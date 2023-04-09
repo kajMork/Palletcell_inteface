@@ -7,7 +7,7 @@ import asyncio
 import time
 import logging
 # JSON telegram template classes
-import json_telegrams
+import cell_json_telegrams as json_telegrams
 import sys
 sys.path.insert(0, "..")
 # TODO:
@@ -53,22 +53,85 @@ class Cell:
                     await asyncio.sleep(5)
                     print("Layer started. state = " + self.state)
                     self.state = "Execute"
-                    await asyncio.sleep(15)
-                    self.state = "Complete"
-                    print("Layer done. state = " + self.state)
+                    print ("Layer executing. state = " + self.state)
+                    ret = await self.palletize_layer_dummy(obj)
+                    if ret == False:
+                        print("Error palletizing layer")
+                        self.state = "Error"
+                        print("Layer error. state = " + self.state)
+                    else:
+                        self.state = "Complete"
+                        print("Layer done. state = " + self.state)
 
+    async def palletize_layer_dummy(self, obj):
+        layer_pattern_id = obj["layer-pattern-id"]
+        # load layer pattern from database
+        layer_pattern_filename = "layer_patterns/" + str(layer_pattern_id) + ".json"
+        try :
+            with open(layer_pattern_filename) as json_file:
+                layer_pattern = json.load(json_file)
+        except:
+            print("Error loading layer pattern")
+            return False
+        # Extraxt info from the received json object
+        start_index = obj["start-index"]
+        num_containers = obj["num-containers"]
+        height_offset = obj["height-offset"]
+        pallet_location_id = obj["pallet-location-id"]
+        
+        # Extract the container pattern from the layer pattern
+        container_pattern= layer_pattern["containers"]
+        
+        # Validate that the layer pattern and the start index and num containers are valid
+        if start_index + num_containers > len(container_pattern):
+            print("Error: start index and num containers are invalid")
+            return False
+        print("Started palletizing ", num_containers, " containers")
+        
+        container_arrival_handler = json_telegrams.container_ID_point(
+            self.cell_prefix, 
+            self.cell_id, 
+            self.client,)
+        
+        container_palletized_handler = json_telegrams.container_palletized(
+            self.cell_prefix,
+            self.cell_id, 
+            self.client, 
+            pallet_location_id, 
+            layer_pattern_id,
+            height_offset,)
+        
+        for i in range(start_index, start_index + num_containers):
+            await asyncio.sleep(3)
+            print("Container arrived at ID point : ", i)
+            container_arrival_handler.position_id = i
+            await container_arrival_handler.send_telegram()
+            await asyncio.sleep(3)
+            print("Container placed on pallet")
+            container_palletized_handler.index = i
+            #tmp_task = asyncio.create_task(self.update_variable(container_palletized_handler, i))   
+            #await tmp_task
+            await container_palletized_handler.send_telegram()
+            
+        return True
+
+
+    #async def update_variable(self, my_obj, value):
+    #    my_obj.index = value   
+        
+    
     async def state_update(self):
         while True:
             if self.state != self.old_state or self.HCL_state_request == True:
                 self.old_state = self.state
                 #self.system_state.state = self.state
                 temp_state = json_telegrams.system_state(self.cell_prefix, self.cell_id, self.client, self.state)
-                print("Sending new state", self.system_state.state)
+                print("Sending new state", temp_state.state)
                 #await self.system_state.send_telegram()
                 await temp_state.send_telegram()
                 self.HCL_state_request = False
             await asyncio.sleep(0.5)
-
+    
     
     async def test_listen(self): # TODO change name to something more appropriate
         async with self.client.messages() as messages:
@@ -79,7 +142,11 @@ class Cell:
     async def subcribe_handler(self):
         await self.client.subscribe(self.HCL_start_layer_topic)
         await self.client.subscribe("palletcell2")
-    
+        
+    async def pattern_handler(self):
+        pattern_handler = json_telegrams.add_update_layer_pattern( self.HCl_prefix, self.HCL_id, self.client,)
+        await pattern_handler.receive_telegram()
+        
     async def opc_ua_handler(self):
 
         @uamethod
@@ -89,8 +156,8 @@ class Cell:
         # setup our server
         server = Server()
         await server.init()
-        server.set_endpoint('opc.tcp://192.168.12.246:4840/server/')
-
+        #server.set_endpoint('opc.tcp://192.168.12.246:4840/server/')
+        server.set_endpoint('opc.tcp://localhost:4840/server/') 
         # setup our own namespace, not really necessary but should as spec
         uri = 'http://examples.freeopcua1.github.io'
         idx = await server.register_namespace(uri)
@@ -124,7 +191,9 @@ class Cell:
             #state_update_task = loop.create_task(self.state_update())
             state_update_task = asyncio.ensure_future(self.state_update())
             opc_ua_task = asyncio.create_task(self.opc_ua_handler())
+            pattern_handler_task = asyncio.create_task(self.pattern_handler())
             
+            await pattern_handler_task
             await opc_ua_task
             await listen_task
             await start_layer_task
