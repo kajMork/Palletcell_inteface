@@ -1,5 +1,5 @@
 import json
-import paho.mqtt.client as mqtt_client
+#import aiomqtt as aiomqtt
 import asyncio_mqtt as aiomqtt
 from asyncua import ua, Server
 from asyncua.common.methods import uamethod
@@ -9,6 +9,7 @@ import logging
 # JSON telegram template classes
 import cell_json_telegrams as json_telegrams
 import sys
+import random
 sys.path.insert(0, "..")
 # TODO:
 # 1. Implement suspend and aborted states and how to handle these requests from HCL.
@@ -20,18 +21,21 @@ sys.path.insert(0, "..")
 # class that represents the pallet cell
 
 class Cell:
-    def __init__(self, id):
+    def __init__(self, prefix, id):
         # Cell specific variables
         self.cell_id = id
-        self.cell_prefix = "palletcells"
+        self.cell_prefix = prefix
         self.client = None
         
         # MQTT topics
-        self.HCl_prefix = "HCL"
-        self.HCL_id = "1"
-        self.HCL_start_layer_topic = self.HCl_prefix + "/" + self.HCL_id + "/palletize/start-layer"
-        self.HCL_state_request_topic = self.HCl_prefix + "/" + self.HCL_id + "/state/request"
-        self.HCL_state_feedback_topic = self.cell_prefix + "/" + self.cell_id + "/system/state"
+        self.start_layer_topic = self.cell_prefix + "/" + self.cell_id + "/palletize/start-layer"
+        self.state_request_topic = self.cell_prefix + "/" + self.cell_id + "/requests"
+        self.state_change_request_topic = self.cell_prefix + "/" + self.cell_id + "/requests/state-change"
+        self.state_feedback_topic = self.cell_prefix + "/" + self.cell_id + "/system/state"
+        
+        
+        # System alarms
+        self.system_alarm = None # Will be defined in main
         
         
         # System state variables
@@ -44,7 +48,7 @@ class Cell:
     async def start_layer(self):
         async with self.client.messages() as messages:
             async for message in messages:
-                if message.topic.matches(self.HCL_start_layer_topic):
+                if message.topic.matches(self.start_layer_topic):
                     obj = json.loads(message.payload) # get the json string and convert it to a python dictionary
                     print("Starting layer with layer-pattern id : " + str(obj["layer-pattern-id"]))
                     print("Starting layer with height-offset : " + str(obj["height-offset"]))
@@ -132,19 +136,36 @@ class Cell:
                 self.HCL_state_request = False
             await asyncio.sleep(0.5)
     
-    
-    async def test_listen(self): # TODO change name to something more appropriate
+    # 5.1 Request telegram (HLC -> Cell) Telegram transmitted by the HLC.
+    # The palletizing cell should send a corresponding telegram on the relevant topic.
+    async def request_handler(self): # TODO change name to something more appropriate
         async with self.client.messages() as messages:
             async for message in messages:
-                if message.topic.matches("palletcell2"): # TODO: change to HCL state request topic
+                if message.topic.matches(self.state_request_topic): # TODO: change to HCL state request topic
                     print("got message " + message.payload.decode()) # TODO: Should act according to the message
+                    # Convert the message to a python dictionary
+                    msg = json.loads(message.payload)
+                    if msg["request"] == "state":
+                        self.HCL_state_request = True
+                        print("Got state request")
+                    elif msg["request"] == "active-alarms":
+                        print("Got active-alarms request")
+                        await self.system_alarm.send_telegram()
+                    elif msg["request"] == "layer-patterns":
+                        print("Got layer-patterns request")
+                        prefix = self.cell_prefix + "/"
+                        cell_id = self.cell_id + "/"
+                        send_layer_pattern_class = json_telegrams.send_layer_pattern(prefix, cell_id, self.client)
+                        await send_layer_pattern_class.send_telegram()
+                        del send_layer_pattern_class
+                        
     
     async def subcribe_handler(self):
-        await self.client.subscribe(self.HCL_start_layer_topic)
-        await self.client.subscribe("palletcell2")
+        await self.client.subscribe(self.start_layer_topic)
+        await self.client.subscribe(self.state_request_topic)
         
     async def pattern_handler(self):
-        pattern_handler = json_telegrams.add_update_layer_pattern( self.HCl_prefix, self.HCL_id, self.client,)
+        pattern_handler = json_telegrams.add_update_layer_pattern( self.cell_prefix, self.cell_id, self.client,)
         await pattern_handler.receive_telegram()
         
     async def opc_ua_handler(self):
@@ -184,10 +205,16 @@ class Cell:
     
     async def main(self):
         loop = asyncio.get_event_loop()
+        #loop = asyncio.ProactorEventLoop()
+        #asyncio.set_event_loop(loop)
         async with aiomqtt.Client("localhost") as self.client:
+            # Define classes:
+            self.system_alarm = json_telegrams.active_alarms(self.cell_prefix, self.cell_id, self.client)
+            
+            # Define tasks:
             subscribe_handler_task = loop.create_task(self.subcribe_handler())
             start_layer_task = loop.create_task(self.start_layer())
-            listen_task = loop.create_task(self.test_listen())
+            request_handler_task = loop.create_task(self.request_handler())
             #state_update_task = loop.create_task(self.state_update())
             state_update_task = asyncio.ensure_future(self.state_update())
             opc_ua_task = asyncio.create_task(self.opc_ua_handler())
@@ -195,7 +222,7 @@ class Cell:
             
             await pattern_handler_task
             await opc_ua_task
-            await listen_task
+            await request_handler_task
             await start_layer_task
             await subscribe_handler_task
             await state_update_task
