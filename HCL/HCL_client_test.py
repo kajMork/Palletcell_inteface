@@ -1,11 +1,14 @@
 # Import mqtt client
 import paho.mqtt.client as mqtt_client
 import asyncio_mqtt as aiomqtt
+#import aiomqtt as aiomqtt
+
 import aioconsole
 import asyncio
 import json
 import HCL_json_telegrams as  json_telegrams
-
+import sys
+import os
 async def wait_for_user_input(client, firsrun):
     while True:
         start_layer_command = {
@@ -89,4 +92,13 @@ async def main():
         await task0
         await task1
 
+
+if sys.platform.lower() == "win32" or os.name.lower() == "nt":
+    # only import if platform/os is win32/nt, otherwise "WindowsSelectorEventLoopPolicy" is not present
+    from asyncio import (
+        set_event_loop_policy,
+        WindowsSelectorEventLoopPolicy
+    )
+    # set the event loop
+    set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 asyncio.run(main())
