@@ -10,6 +10,7 @@ import logging
 import cell_json_telegrams as json_telegrams
 import sys
 import random
+import ssl
 sys.path.insert(0, "..")
 # TODO:
 # 1. Implement suspend and aborted states and how to handle these requests from HCL.
@@ -205,9 +206,21 @@ class Cell:
     
     async def main(self):
         loop = asyncio.get_event_loop()
-        #loop = asyncio.ProactorEventLoop()
-        #asyncio.set_event_loop(loop)
-        async with aiomqtt.Client("localhost") as self.client:
+        
+        # Load the certificates:
+        tls_params = aiomqtt.TLSParameters(
+            ca_certs="cert\mqtt.crt",
+            certfile=None,
+            keyfile=None,
+            cert_reqs=None,
+            tls_version=None,
+            ciphers=None,
+        )
+        hostname = "broker.intelligentsystems.mqtt"
+        port = 8883
+        client_id = "palletizing_cell"
+        
+        async with aiomqtt.Client(hostname, tls_params=tls_params, port=port, client_id=client_id) as self.client:
             # Define classes:
             self.system_alarm = json_telegrams.active_alarms(self.cell_prefix, self.cell_id, self.client)
             
