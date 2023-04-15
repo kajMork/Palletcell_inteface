@@ -4,3 +4,7 @@
 questions
 
 *.crt
+
+/cert
+
+*.txt
