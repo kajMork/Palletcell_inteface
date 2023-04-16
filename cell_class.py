@@ -4,19 +4,13 @@ import asyncio_mqtt as aiomqtt
 from asyncua import ua, Server
 from asyncua.common.methods import uamethod
 import asyncio
-import time
 import logging
 # JSON telegram template classes
 import cell_json_telegrams as json_telegrams
 import sys
-import random
-import ssl
 sys.path.insert(0, "..")
 # TODO:
 # 1. Implement suspend and aborted states and how to handle these requests from HCL.
-# 2. Implement the request of partial layer palletization Page 28, chapter 6.2.
-# 3. Implement completion state when palletization is done.
-# 4. Implement 6.1 palletizing loop, that sends Container at ID Point, and Container placed on Pallet.
 # 
 
 # class that represents the pallet cell
@@ -125,7 +119,7 @@ class Cell:
     #    my_obj.index = value   
         
     
-    async def state_update(self):
+    async def state_updater(self):
         while True:
             if self.state != self.old_state or self.HCL_state_request == True:
                 self.old_state = self.state
@@ -229,7 +223,7 @@ class Cell:
             start_layer_task = loop.create_task(self.start_layer())
             request_handler_task = loop.create_task(self.request_handler())
             #state_update_task = loop.create_task(self.state_update())
-            state_update_task = asyncio.ensure_future(self.state_update())
+            state_updater_task = asyncio.ensure_future(self.state_updater())
             opc_ua_task = asyncio.create_task(self.opc_ua_handler())
             pattern_handler_task = asyncio.create_task(self.pattern_handler())
             
@@ -238,7 +232,7 @@ class Cell:
             await request_handler_task
             await start_layer_task
             await subscribe_handler_task
-            await state_update_task
+            await state_updater_task
         
     
     
