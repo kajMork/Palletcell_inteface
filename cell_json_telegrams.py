@@ -3,12 +3,12 @@ import json
 import glob
 import asyncio
 # 4.3 Error Message
-async def error_message(topic, client, error_id):
+async def send_error_message(topic, client, error_id):
     """Send error message to HLC, based on error_id.
 
     Args:
         topic (string): 
-        client (_type_): _description_
+        client (_type_): 
         error_id (string): Supports: ERR_UNSUPPORTED, ERR_INVALID_MESSAGE, ERR_INVALID_STATE
     """
     description = None
@@ -23,7 +23,7 @@ async def error_message(topic, client, error_id):
     error_message = {
         "version": "v1.0",
         "error": error_id,
-        "reason": description,
+        "reason": description
     }
     await client.publish(topic, json.dumps(error_message)) # Send telegram
 
@@ -194,18 +194,26 @@ class add_update_layer_pattern:
         async with self.client.messages() as messages:
             async for message in messages:
                 if message.topic.matches(self.topic_name):
-                    obj = json.loads(message.payload)
-                    id = str(obj["id"])
-                    pattern_file_name = "layer_patterns/"+id+".json"
-                    # Add or update the layer pattern file in the layer_patterns folder
-                    with open(pattern_file_name, "w+") as file:
-                        json.dump(obj, file)
-                    print("Layer pattern file updated: "+pattern_file_name)
-                    # Close the file
-                    file.close()
-                    # Send  the layer pattern back to the HLC to confirm that it was received
-                    send_layer_pattern_class = send_layer_pattern(self.prefix, self.cell_id, self.client)
-                    await send_layer_pattern_class.send_telegram()
+                    # Validate the message as a JSON object
+                    try:
+                        obj = json.loads(message.payload)
+                        id = str(obj["id"])
+                        pattern_file_name = "layer_patterns/"+id+".json"
+                        # Add or update the layer pattern file in the layer_patterns folder
+                        with open(pattern_file_name, "w+") as file:
+                            json.dump(obj, file)
+                        print("Layer pattern file updated: "+pattern_file_name)
+                        # Close the file
+                        file.close()
+                        # Send  the layer pattern back to the HLC to confirm that it was received
+                        send_layer_pattern_class = send_layer_pattern(self.prefix, self.cell_id, self.client)
+                        await send_layer_pattern_class.send_telegram()
+                    except:
+                        print("Invalid layer pattern telegram received")
+                        topic = self.prefix + self.cell_id + "layer-pattern"
+                        await send_error_message(topic, self.client, "ERR_INVALID_MESSAGE")
+                    
+                        
                     
 
 
