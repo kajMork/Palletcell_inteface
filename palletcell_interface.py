@@ -6,12 +6,10 @@
 # For running the mqtt broker
 # $ cd $VERNEMQ/_build/default/rel/vernemq
 #$ bin/vernemq start
-import paho.mqtt.client as mqtt_client
-import asyncio_mqtt as aiomqtt
+
 #import aiomqtt as aiomqtt
 import cell_class
 import asyncio
-import time
 import sys
 import os
 
