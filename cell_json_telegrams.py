@@ -1,7 +1,8 @@
-import utils
 import json
 import glob
-import asyncio
+import utils
+
+
 # 4.3 Error Message
 async def send_error_message(topic, client, error_id):
     """Send error message to HLC, based on error_id.
