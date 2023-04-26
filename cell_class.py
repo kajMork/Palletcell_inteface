@@ -8,9 +8,11 @@ import logging
 # JSON telegram template classes
 import cell_json_telegrams as json_telegrams
 import sys
+import aioconsole
 sys.path.insert(0, "..")
 # TODO:
-# 1. Implement suspend and aborted states and how to handle these requests from HCL.
+# 1. Implement Invalid state handler
+# 2. Implement suspend and aborted states and how to handle these requests from HCL.
 # 
 
 # class that represents the pallet cell
@@ -196,7 +198,33 @@ class Cell:
                 elif self.state == "Complete":
                     _logger.info('Set value of %s to %.s', myvar, self.state)
                     await myvar.write_value(self.state)
-                
+    
+    async def wait_for_user_input(self):
+        while True:
+            user_input = await aioconsole.ainput() # Allows for async input
+            user_input = str(user_input)
+            # Check if user input can be separated into two words
+            if len(user_input.split()) > 1:
+                user_input = user_input.split()
+                if user_input[0] == "setalarm":
+                    alarm_id = int(user_input[1])
+                    alarm_text = "Alarm : " + str(alarm_id)
+                    if user_input[2] == "True" or user_input[2] == "true" or user_input[2] == "1" or user_input[2] == "on" or user_input[2] == "On" or user_input[2] == "ON":
+                        active = True
+                    elif user_input[2] == "False" or user_input[2] == "false" or user_input[2] == "0" or user_input[2] == "off" or user_input[2] == "Off" or user_input[2] == "OFF":
+                        active = False
+                    else:
+                        print("Invalid input, please use True or False")
+                        break
+                    print("Setting alarm", alarm_id, "to", active)
+                    await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm)
+            elif user_input == "sendalarms":
+                await self.system_alarm.send_telegram()
+                     
+            elif user_input == "help":
+                print("Commands: setalarm, sendalarms")
+            else:
+                print("Invalid command, type help for list of commands")
     
     async def main(self):
         loop = asyncio.get_event_loop()
@@ -226,7 +254,9 @@ class Cell:
             state_updater_task = asyncio.ensure_future(self.state_updater())
             opc_ua_task = asyncio.create_task(self.opc_ua_handler())
             pattern_handler_task = asyncio.create_task(self.pattern_handler())
+            cmd_handler = asyncio.create_task(self.wait_for_user_input())
             
+            await cmd_handler
             await pattern_handler_task
             await opc_ua_task
             await request_handler_task
