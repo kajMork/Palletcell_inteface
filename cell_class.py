@@ -1,7 +1,7 @@
 import json
 #import aiomqtt as aiomqtt
 import asyncio_mqtt as aiomqtt
-from asyncua import ua, Server
+from asyncua import ua, Server, Client
 from asyncua.common.methods import uamethod
 import asyncio
 import logging
@@ -29,7 +29,7 @@ class Cell:
         self.state_request_topic = self.cell_prefix + "/" + self.cell_id + "/requests"
         self.state_change_request_topic = self.cell_prefix + "/" + self.cell_id + "/requests/state-change"
         self.state_feedback_topic = self.cell_prefix + "/" + self.cell_id + "/system/state"
-        
+        self.transport_request_topic = self.cell_prefix + "/" + self.cell_id + "/request/transport"
         
         # System alarms
         self.system_alarm = None # Will be defined in main
@@ -38,34 +38,119 @@ class Cell:
         # System state variables
         self.old_state = "Offline"
         self.state = "Idle"
+        
+        self.task_id = "0"
+        self.pallet_place_id = "0"
+        self.pallet_error_code_id = "0"
+        self.pallet_status_id = "0"
+        self.ur_response = "0"
+        self.reset_opcua_vars = False
         self.system_state = json_telegrams.system_state(self.cell_prefix, self.cell_id, self.client, self.state)
         self.HCL_state_request = False
-       
+        
+        # Pick and place variables
+        self.from_location_id = None
+        self.to_location_id = None
+        self.item_id = None
+        
+        #self.opc_ua_server, self.opc_ua_idx, self.opc_ua_logger = 
+        
+    
+    """async def start_OPC_UA_server(self):
+        # Start OPC UA server
+        _logger = logging.getLogger('asyncua')
+        # setup our server
+        server = Server()
+        await server.init()
+        server.set_endpoint('opc.tcp://192.168.12.103:4840/server/')
+        #server.set_endpoint('opc.tcp://localhost:4840/server/') 
+        # setup our own namespace, not really necessary but should as spec
+        uri = 'http://examples.freeopcua1.github.io'
+        idx = await server.register_namespace(uri)
+        
+        myobj = await server.nodes.objects.add_object(idx, 'palletizing_object')
+        pallet_place = await myobj.add_variable(idx, 'pallet_place', str(0)) # initialized as 0, can be 1 to 3 
+        task = await myobj.add_variable(idx, 'task', str(0)) # initialized as 0, can be 1 to 4
+        pallet_status = await myobj.add_variable(idx, 'pallet_status', str(0)) # initialized as 0, can be 1 to 4
+        pallet_error_code = await myobj.add_variable(idx, 'pallet_error_code', str(0)) # initialized as 0, can be 1 to 4
+    
+        await pallet_place.set_writable()
+        async with server:
+            while True:
+        return server, idx, _logger"""
+        
+    
     # 5.5.1 Start Palletizing Single Layer (HLC -> PLC)
     async def start_layer(self):
         async with self.client.messages() as messages:
             async for message in messages:
                 if message.topic.matches(self.start_layer_topic):
                     obj = json.loads(message.payload) # get the json string and convert it to a python dictionary
-                    print("Starting layer with layer-pattern id : " + str(obj["layer-pattern-id"]))
-                    print("Starting layer with height-offset : " + str(obj["height-offset"]))
+                    print("Starting layer with layer_pattern id : " + str(obj["layer_pattern_id"]))
+                    self.pallet_place_id = str(int(obj["start_index"])+1) # Set palletizing place id for OPC UA
+                    print("Starting layer with height_offset : " + str(obj["height_offset"]))
                     print("Sent at : " + str(obj["timestamp"]))
                     self.state = "Starting"
-                    await asyncio.sleep(5)
-                    print("Layer started. state = " + self.state)
-                    self.state = "Execute"
-                    print ("Layer executing. state = " + self.state)
-                    ret = await self.palletize_layer_dummy(obj)
+                    await asyncio.sleep(3)
+                    ret = await self.palletize_layer_demo2(obj)
                     if ret == False:
                         print("Error palletizing layer")
                         self.state = "Error"
                         print("Layer error. state = " + self.state)
-                    else:
-                        self.state = "Complete"
-                        print("Layer done. state = " + self.state)
 
-    async def palletize_layer_dummy(self, obj):
-        layer_pattern_id = obj["layer-pattern-id"]
+    async def pick_place (self):
+        async def reset_values():
+            self.from_location_id = None
+            #self.to_location_id = None
+            #self.item_id = None
+        while True:
+            if (self.from_location_id == None):
+                await asyncio.sleep(1)
+            else:
+                self.state = "Starting"
+                await asyncio.sleep(1)
+                print("Moving", self.item_id, "from", self.from_location_id, "to", self.to_location_id)
+                if self.from_location_id == "container_tray" and self.to_location_id == "left_spot":
+                    await reset_values()
+                    print("Picking from container tray and placing left spot")
+                    await self.run_ur_program("1")
+                elif self.from_location_id == "technicon_cell" and self.to_location_id == "right_spot":
+                    print("Picking from technicon_cell and placing on right spot")
+                    await reset_values()
+                    await self.run_ur_program("2")
+                elif (self.from_location_id == "left_spot" and self.to_location_id == "technicon_cell"):
+                    print("Picking from left spot to technicon cell")
+                    await reset_values()
+                    await self.run_ur_program("3")
+                else:
+                    print("Invalid pick and place")
+                    await reset_values()
+                await asyncio.sleep(1)
+                #running_task = False
+    
+    async def run_ur_program(self, task_id, container_palletized_handler = None):
+        self.state = "Execute"
+        self.task_id = task_id
+        await self.opc_ua_update_items()
+        while(self.ur_response != "1"):
+            await asyncio.sleep(1)
+        print("received ur response")
+        self.task_id = "0"
+        while(self.pallet_status_id != "1"):
+            await asyncio.sleep(1)
+        if task_id != "4":
+            await json_telegrams.container_at_location(self.cell_prefix, self.cell_id, self.client, self.to_location_id, self.item_id)
+        if container_palletized_handler != None:
+            print("Container placed on pallet")
+            await container_palletized_handler.send_telegram()
+        self.state = "Complete"
+        await asyncio.sleep(1)
+        self.state = "Resetting"
+        self.reset_opcua_vars = True
+        self.state = "Idle"
+    
+    async def palletize_layer_demo2(self, obj):
+        layer_pattern_id = obj["layer_pattern_id"]
         # load layer pattern from database
         layer_pattern_filename = "layer_patterns/" + str(layer_pattern_id) + ".json"
         try :
@@ -75,10 +160,59 @@ class Cell:
             print("Error loading layer pattern")
             return False
         # Extraxt info from the received json object
-        start_index = obj["start-index"]
-        num_containers = obj["num-containers"]
-        height_offset = obj["height-offset"]
-        pallet_location_id = obj["pallet-location-id"]
+        start_index = obj["start_index"]
+        num_containers = obj["num_containers"]
+        height_offset = obj["height_offset"]
+        pallet_location_id = obj["pallet_location_id"]
+        
+        # Extract the container pattern from the layer pattern
+        container_pattern= layer_pattern["containers"]
+        
+        # Validate that the layer pattern and the start index and num containers are valid
+        if start_index + num_containers > len(container_pattern):
+            print("Error: start index and num containers are invalid")
+            return False
+        print("Started palletizing ", num_containers, " containers")
+        
+        container_arrival_handler = json_telegrams.container_ID_point(
+            self.cell_prefix, 
+            self.cell_id, 
+            self.client,)
+        
+        container_palletized_handler = json_telegrams.container_palletized(
+            self.cell_prefix,
+            self.cell_id, 
+            self.client, 
+            pallet_location_id, 
+            layer_pattern_id,
+            height_offset,)
+        for i in range(start_index, start_index + num_containers): 
+            await asyncio.sleep(3)
+            print("Container arrived at ID point : ", layer_pattern_id)
+            container_arrival_handler.position_id = layer_pattern_id
+            await container_arrival_handler.send_telegram()
+            await asyncio.sleep(1)
+            # Wait UR robot to update pallet_status_id to 1
+            container_palletized_handler.index = layer_pattern_id
+            await self.run_ur_program("4", container_palletized_handler)
+        return True
+        
+    
+    async def palletize_layer_dummy(self, obj):
+        layer_pattern_id = obj["layer_pattern_id"]
+        # load layer pattern from database
+        layer_pattern_filename = "layer_patterns/" + str(layer_pattern_id) + ".json"
+        try :
+            with open(layer_pattern_filename) as json_file:
+                layer_pattern = json.load(json_file)
+        except:
+            print("Error loading layer pattern")
+            return False
+        # Extraxt info from the received json object
+        start_index = obj["start_index"]
+        num_containers = obj["num_containers"]
+        height_offset = obj["height_offset"]
+        pallet_location_id = obj["pallet_location_id"]
         
         # Extract the container pattern from the layer pattern
         container_pattern= layer_pattern["containers"]
@@ -116,10 +250,6 @@ class Cell:
             
         return True
 
-
-    #async def update_variable(self, my_obj, value):
-    #    my_obj.index = value   
-        
     
     async def state_updater(self):
         while True:
@@ -146,59 +276,96 @@ class Cell:
                         self.HCL_state_request = True
                         print("Got state request")
                     elif msg["request"] == "active-alarms":
-                        print("Got active-alarms request")
+                        print("Got active_alarms request")
                         await self.system_alarm.send_telegram()
                     elif msg["request"] == "layer-patterns":
-                        print("Got layer-patterns request")
+                        print("Got layer_patterns request")
                         prefix = self.cell_prefix + "/"
                         cell_id = self.cell_id + "/"
                         send_layer_pattern_class = json_telegrams.send_layer_pattern(prefix, cell_id, self.client)
                         await send_layer_pattern_class.send_telegram()
                         del send_layer_pattern_class
-                        
-    
+                elif message.topic.matches(self.transport_request_topic):
+                    #print("got message " + message.payload.decode())
+                    msg = json.loads(message.payload)
+                    self.from_location_id = msg["from_location_id"]
+                    self.to_location_id = msg["to_location_id"]
+                    self.item_id = msg["item_id"]
+                    print("Got transport for moving", self.item_id, "from", self.from_location_id, "to", self.to_location_id)
+                    await json_telegrams.container_transport_reply(self.cell_prefix, self.cell_id, self.client, msg["request_id"])
+                    
+                    
+                       
+                       
     async def subcribe_handler(self):
         await self.client.subscribe(self.start_layer_topic)
         await self.client.subscribe(self.state_request_topic)
+        await self.client.subscribe(self.state_change_request_topic)
+        await self.client.subscribe(self.transport_request_topic)
         
     async def pattern_handler(self):
         pattern_handler = json_telegrams.add_update_layer_pattern( self.cell_prefix, self.cell_id, self.client,)
         await pattern_handler.receive_telegram()
+    
+    
+    async def opc_ua_update_items(self):
+        client = Client('opc.tcp://192.168.100.212:4840/server/')
+        await client.connect()
+        print("Client connected")
+        # Start loop to read from OPCUA server
         
+        task = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:task"])
+        pallet_status = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_status"])
+        pallet_place = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_place"])
+        pallet_error_code = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_error_code"])
+        ur_response = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:ur_response"])
+        
+        
+        await pallet_place.write_value(str(self.pallet_place_id))
+        await task.write_value(str(self.task_id))
+        
+        # Clode the connection
+        await client.disconnect()
+        
+            
+            
     async def opc_ua_handler(self):
 
-        @uamethod
-        def func(parent, value):
-            return value * 2
         _logger = logging.getLogger('asyncua')
-        # setup our server
-        server = Server()
-        await server.init()
-        #server.set_endpoint('opc.tcp://192.168.12.246:4840/server/')
-        server.set_endpoint('opc.tcp://localhost:4840/server/') 
-        # setup our own namespace, not really necessary but should as spec
-        uri = 'http://examples.freeopcua1.github.io'
-        idx = await server.register_namespace(uri)
-
-        # populating our address space
-        # server.nodes, contains links to very common nodes like objects and root
-        myobj = await server.nodes.objects.add_object(idx, 'MyObject')
-        myvar = await myobj.add_variable(idx, 'MyVariable', str(1))
+        # setup our opcua client
+        client = Client('opc.tcp://192.168.100.212:4840/server/')
+        await client.connect()
+        print("Client connected")
+        # Start loop to read from OPCUA server
         
-        await myvar.set_writable()
+        task = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:task"])
+        pallet_status = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_status"])
+        pallet_place = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_place"])
+        pallet_error_code = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:pallet_error_code"])
+        ur_response = await client.nodes.root.get_child(["0:Objects", f"2:palletizing_object", f"2:ur_response"])
         
-        await server.nodes.objects.add_method(ua.NodeId('ServerMethod', 2), ua.QualifiedName('ServerMethod', 2), func, [ua.VariantType.Int64], [ua.VariantType.Int64])
+        #await server.nodes.objects.add_method(ua.NodeId('ServerMethod', 2), ua.QualifiedName('ServerMethod', 2), func, [ua.VariantType.Int64], [ua.VariantType.Int64])
         _logger.info('Starting server!')
-        async with server:
-            while True:
-                await asyncio.sleep(1)
-                if self.state == "Execute":
-                    _logger.info('Set value of %s to %.s', myvar, self.state)
-                    await myvar.write_value(self.state)
-                elif self.state == "Complete":
-                    _logger.info('Set value of %s to %.s', myvar, self.state)
-                    await myvar.write_value(self.state)
-    
+        while True:
+            await asyncio.sleep(1)
+            # Read pallet_place_status
+            if self.reset_opcua_vars == True:
+                await ur_response.write_value("0")
+                await pallet_status.write_value("0")
+                self.reset_opcua_vars = False
+            
+            self.pallet_status_id = await pallet_status.read_value()
+            # Read pallet_error_code
+            self.pallet_error_code = await pallet_error_code.read_value()
+            
+            self.ur_response = await ur_response.read_value()
+            # Now we update pallet_task and place if we got a new task
+            """if self.pallet_place_id != await pallet_place.read_value():
+                await pallet_place.write_value(str(self.pallet_place_id))
+            if self.task_id != await task.read_value():
+                await task.write_value(str(self.task_id))"""
+                
+
     async def wait_for_user_input(self):
         while True:
             user_input = await aioconsole.ainput() # Allows for async input
@@ -239,12 +406,15 @@ class Cell:
             ciphers=None,
         )
         hostname = "broker.intelligentsystems.mqtt"
+        #hostname = "localhost"
         port = 8883
         client_id = "palletizing_cell"
-        
+        #tls_params=tls_params
         async with aiomqtt.Client(hostname, tls_params=tls_params, port=port, client_id=client_id) as self.client:
             # Define classes:
             self.system_alarm = json_telegrams.active_alarms(self.cell_prefix, self.cell_id, self.client)
+            
+            #self.opc_ua_server, self.opc_ua_idx, self.opc_ua_logger = await self.start_OPC_UA_server()
             
             # Define tasks:
             subscribe_handler_task = loop.create_task(self.subcribe_handler())
@@ -255,7 +425,9 @@ class Cell:
             opc_ua_task = asyncio.create_task(self.opc_ua_handler())
             pattern_handler_task = asyncio.create_task(self.pattern_handler())
             cmd_handler = asyncio.create_task(self.wait_for_user_input())
+            pick_place_handler = asyncio.create_task(self.pick_place())
             
+            await pick_place_handler
             await cmd_handler
             await pattern_handler_task
             await opc_ua_task
