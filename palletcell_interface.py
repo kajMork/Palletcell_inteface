@@ -26,6 +26,6 @@ if sys.platform.lower() == "win32" or os.name.lower() == "nt":
     # set the event loop
     set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
-new_cell = cell_class.Cell("palletcells","1")
-
+new_cell = cell_class.Cell("palletizing-cells","something")
+#new_cell = cell_class.Cell("palletcells","1")
 asyncio.run(new_cell.main())
