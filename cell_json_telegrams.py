@@ -237,7 +237,7 @@ class container_ID_point:
         self.container_ID_point_telegram = {
             "version": self.version,
             "position_id": self.position_id,
-            "scan": self.scan,
+            "scanned_id": self.scan,
             "timestamp": utils.get_datetime()
         }
 
@@ -245,7 +245,7 @@ class container_ID_point:
         telegram = self.container_ID_point_telegram.copy()
         telegram["timestamp"] = utils.get_datetime() # Update timestamp
         telegram["position_id"] = self.position_id
-        telegram["scan"] = self.scan
+        telegram["scanned_id"] = self.scan
         await self.client.publish(self.topic_name, json.dumps(telegram)) # Send telegram
         del telegram # Delete the telegram to save memory
 
