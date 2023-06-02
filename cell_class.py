@@ -11,11 +11,37 @@ import sys
 import aioconsole
 sys.path.insert(0, "..")
 # TODO:
-# 1. Implement Invalid state handler
-# 2. Implement suspend and aborted states and how to handle these requests from HCL.
-# 
+# 1. Move all simulation / dummy functions to a separate file.
+# 2. Error handling should be done in start state, before actually executing.
+# 3. Implement start state before we can start the palletizing job
+# 4. Add un-suspending state.
 
-# class that represents the pallet cell
+
+"""
+This is the class for the palletizing cell. It contains all the functions and variables needed to run the cell.
+The cell is controlled by the HLC and communicates with it using MQTT.
+The cell also communicates with the ER system using OPC UA.
+The cell class and all related functions use the async/await syntax to allow for asynchronous programming.
+Meaning that the cell can do multiple things at once, such as listening for MQTT messages and communicating with the ER system.
+A normal state machine is therefore not used, but instead the state of the cell is updated according to the state of the task.
+The flow of the program therefore still follows the state machine approach, but can still do other things while waiting for a state change.
+
+As an example, this will allow the cell to handle background task, such as handling requests from the HLC, while also handling the palletizing process.
+
+
+The Cell class contains the following functions:
+- start_layer() - This is the primary function after the main function, and is used to handle the entire palletizing process.
+- palletize_layer_dummy() - This is a dummy function that simulates the palletizing process.
+- state_updater() - This function monitors the state of the cell and sends a telegram to the HLC when the state changes or when the HLC requests it.
+- request_handler() - This function handles the request telegrams from the HLC.
+- subcribe_handler() - This function handles the subscribe telegrams from the HLC that the main function need.
+- pattern_handler() - This function handles the pattern telegrams sent from the HLC.
+- opc_ua_handler() - This function handles the OPC UA communication with the ER system.
+- wait_for_user_input() - This function is used for debugging and is not used in the final version.
+- main() - This is the main function of the cell, and is used to set up all async functions and start the cell.
+"""
+
+
 
 class Cell:
     def __init__(self, prefix, id):
@@ -82,22 +108,33 @@ class Cell:
     
     # 5.5.1 Start Palletizing Single Layer (HLC -> PLC)
     async def start_layer(self):
+        """This is the primary function of the cell and handles the entire palletizing process.
+           It listens for start layer telegrams from the HLC and starts the palletizing process.
+           It also updates the state according to the state of the task, and handles if the HLC requests a state change.
+           OPC UA variables are also updated according to the state of the cell.
+           
+           NOTE: As of now, the palletizing process is simulated.
+        """   
         async with self.client.messages() as messages:
             async for message in messages:
                 if message.topic.matches(self.start_layer_topic):
-                    obj = json.loads(message.payload) # get the json string and convert it to a python dictionary
-                    print("Starting layer with layer_pattern id : " + str(obj["layer_pattern_id"]))
-                    self.pallet_place_id = str(int(obj["start_index"])+1) # Set palletizing place id for OPC UA
-                    print("Starting layer with height_offset : " + str(obj["height_offset"]))
-                    print("Sent at : " + str(obj["timestamp"]))
-                    self.state = "Starting"
-                    await asyncio.sleep(3)
-                    ret = await self.palletize_layer_demo2(obj)
-                    if ret == False:
-                        print("Error palletizing layer")
-                        self.state = "Error"
-                        print("Layer error. state = " + self.state)
-
+                    if self.state == "Idle":
+                        obj = json.loads(message.payload) # get the json string and convert it to a python dictionary
+                        print("Starting layer with layer_pattern id : " + str(obj["layer_pattern_id"]))
+                        self.pallet_place_id = str(int(obj["start_index"])+1) # Set palletizing place id for OPC UA
+                        print("Starting layer with height_offset : " + str(obj["height_offset"]))
+                        print("Sent at : " + str(obj["timestamp"]))
+                        self.state = "Starting"
+                        await asyncio.sleep(3)
+                        ret = await self.palletize_layer_demo2(obj)
+                        if ret == False:
+                            print("Error palletizing layer")
+                            self.state = "Error"
+                            print("Layer error. state = " + self.state)
+                    else:
+                        print("Error: Received start layer telegram while not in Idle state")
+                        await json_telegrams.send_error_message(self.state_feedback_topic, self.client, "ERR_INVALID_STATE")
+                     
     async def pick_place (self):
         async def reset_values():
             self.from_location_id = None
@@ -158,6 +195,11 @@ class Cell:
                 layer_pattern = json.load(json_file)
         except:
             print("Error loading layer pattern")
+            alarm_id = "52"
+            alarm_text = "Error: Layer pattern with ID: " + str(layer_pattern_id)+ " not found"
+            active = True
+            print("Setting alarm", alarm_id, "to", active)
+            await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm) # Set alarm and send telegram 
             return False
         # Extraxt info from the received json object
         start_index = obj["start_index"]
@@ -171,6 +213,11 @@ class Cell:
         # Validate that the layer pattern and the start index and num containers are valid
         if start_index + num_containers > len(container_pattern):
             print("Error: start index and num containers are invalid")
+            alarm_id = "51"
+            alarm_text = "Error: start index and num containers are invalid"
+            active = True
+            print("Setting alarm", alarm_id, "to", active)
+            await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm) # Set alarm and send telegram  
             return False
         print("Started palletizing ", num_containers, " containers")
         
@@ -374,17 +421,23 @@ class Cell:
             if len(user_input.split()) > 1:
                 user_input = user_input.split()
                 if user_input[0] == "setalarm":
-                    alarm_id = int(user_input[1])
-                    alarm_text = "Alarm : " + str(alarm_id)
-                    if user_input[2] == "True" or user_input[2] == "true" or user_input[2] == "1" or user_input[2] == "on" or user_input[2] == "On" or user_input[2] == "ON":
-                        active = True
-                    elif user_input[2] == "False" or user_input[2] == "false" or user_input[2] == "0" or user_input[2] == "off" or user_input[2] == "Off" or user_input[2] == "OFF":
-                        active = False
+                    if len(user_input) != 3: # Handle if the user input is not valid
+                        print("Invalid input, please use setalarm <alarm_id> <True/False>")
                     else:
-                        print("Invalid input, please use True or False")
-                        break
-                    print("Setting alarm", alarm_id, "to", active)
-                    await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm)
+                        alarm_id = int(user_input[1])
+                        alarm_text = "Alarm : " + str(alarm_id)
+                        if user_input[2] == "True" or user_input[2] == "true" or user_input[2] == "1" or user_input[2] == "on" or user_input[2] == "On" or user_input[2] == "ON":
+                            active = True
+                            print("Setting alarm", alarm_id, "to", active)
+                            await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm) # Set alarm and send telegram
+                        elif user_input[2] == "False" or user_input[2] == "false" or user_input[2] == "0" or user_input[2] == "off" or user_input[2] == "Off" or user_input[2] == "OFF":
+                            active = False
+                            print("Setting alarm", alarm_id, "to", active)
+                            await json_telegrams.add_alarm_state(self.cell_prefix, self.cell_id, self.client, alarm_id, alarm_text, active, self.system_alarm) # Set alarm and send telegram
+                        else:
+                            print("Invalid input, please use True or False")        
+                else:
+                    print("Invalid command, type help for list of commands") 
             elif user_input == "sendalarms":
                 await self.system_alarm.send_telegram()
                      
@@ -407,7 +460,7 @@ class Cell:
         )
         hostname = "broker.intelligentsystems.mqtt"
         #hostname = "localhost"
-        port = 8883
+        port = 8883 #16372
         client_id = "palletizing_cell"
         #tls_params=tls_params
         async with aiomqtt.Client(hostname, tls_params=tls_params, port=port, client_id=client_id) as self.client:
