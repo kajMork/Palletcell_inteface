@@ -89,7 +89,7 @@ async def add_alarm_state(prefix, cell_id, client, alarm_id, alarm_text, active,
     alarm_state_telegram = {
         "version": version,
         "timestamp": utils.get_datetime(),
-        "alarm_id": alarm_id,
+        "alarm_id": str(alarm_id),
         "alarm_text": alarm_text,
         "active": active
     }
@@ -126,14 +126,14 @@ class active_alarms:
         
     async def add_alarm(self, alarm_id, alarm_text, active):
         alarm = {
-            "alarm-id": alarm_id,
-            "alarm-text": alarm_text,
+            "alarm_id": str(alarm_id),
+            "alarm_text": alarm_text,
             "active": active
         }
         # If alarm is is not active, remove it from the list
         if not active:
             for alarm in self.telegram_template["alarms"]:
-                if alarm["alarm-id"] == alarm_id:
+                if alarm["alarm_id"] == str(alarm_id):
                     self.telegram_template["alarms"].remove(alarm)
         else:
             # Only add alarm if it is not already in the list
@@ -176,8 +176,6 @@ class send_layer_pattern:
         await self.client.publish(self.topic_name, json.dumps(telegram)) # Send telegram
         
             
-        
-
 
 #5.3.2 Add/Update Layer Pattern (HLC -> Cell)
 #Telegram transmitted by the HLC. Sent when a new layer pattern should be stored on the
@@ -238,7 +236,7 @@ class container_ID_point:
 
         self.container_ID_point_telegram = {
             "version": self.version,
-            "position-id": self.position_id,
+            "position_id": self.position_id,
             "scan": self.scan,
             "timestamp": utils.get_datetime()
         }
@@ -246,7 +244,7 @@ class container_ID_point:
     async def send_telegram(self):
         telegram = self.container_ID_point_telegram.copy()
         telegram["timestamp"] = utils.get_datetime() # Update timestamp
-        telegram["position-id"] = self.position_id
+        telegram["position_id"] = self.position_id
         telegram["scan"] = self.scan
         await self.client.publish(self.topic_name, json.dumps(telegram)) # Send telegram
         del telegram # Delete the telegram to save memory
@@ -266,18 +264,18 @@ class container_palletized:
         
         # Telegram specific variables
         self.version = "v1.0"
-        self.pallet_location_id = pallet_location_id
-        self.layer_pattern_id = layer_pattern_id
+        self.pallet_location_id = str(pallet_location_id)
+        self.layer_pattern_id = str(layer_pattern_id)
         self.index = None
         self.height_offset = height_offset
         
         # Create the telegram
         self.container_palletized_telegram = {
             "version": self.version,
-            "pallet-location-id": self.pallet_location_id,
-            "layer-pattern-id": self.layer_pattern_id,
+            "pallet_location_id": str(self.pallet_location_id),
+            "layer_pattern_id": str(self.layer_pattern_id),
             "index": self.index,
-            "height-offset": self.height_offset,
+            "height_offset": self.height_offset,
             "timestamp": utils.get_datetime()
         }
         
@@ -291,7 +289,39 @@ class container_palletized:
     async def set_index(self, index):
         self.index = index
 
+# 5.4.3 Item/container at Location (HLC <-> Cell) 
+# Telegram transmitted by the production cell when an item/container arrives at a location. 
+# This includes both locations that are only accessible by the production cell and locations that external equipment can interact with.
+# Sent when an item/container arrives at a location, either in relation to a scan at an ID point, 
+# result of a Item/container transport or as part of the flow at the production cell.
+# If there are no scanners at the location or the ID could not be otherwise determined, the
+# item_id is set to null
+async def container_at_location(prefix, cell_id, client, position_id, item_id):
+    topic_name = prefix + "/" + cell_id + "/item/location"
+    
+    telegram = {
+    "version": "v1.0",
+    "position_id": str(position_id),
+    "item_id": str(item_id),
+    "timestamp": utils.get_datetime()}
+    
+    await client.publish(topic_name, json.dumps(telegram)) # Send telegram
+    
 
+# 5.4.5 Item/container transport reply (Cell -> HLC)
+#Telegram transmitted by either the HLC or the cell. 
+#Used as a response for an Item/container transport request.
+async def container_transport_reply(prefix, cell_id, client, request_id):
+    topic_name = prefix + "/" + cell_id + "/request/transport/reply"
+    
+    telegram = {
+    "version": "v1.0",
+    "request_id": str(request_id),
+    "response": True,
+    "timestamp": utils.get_datetime()}
+    
+    await client.publish(topic_name, json.dumps(telegram)) # Send telegram
+    
 if __name__ == "__main__":
     # For testing purposes
     pass # Do nothing
